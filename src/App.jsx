@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const serverUrl = 'https://server-esp32-pda4.onrender.com';
+const serverUrl = 'http://61bd0b515bfb.ngrok-free.app'; // ⚠️ HTTP
 
 function App() {
   const [led1State, setLed1State] = useState('off');
