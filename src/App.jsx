@@ -1,115 +1,103 @@
-import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const serverUrl = 'http://61bd0b515bfb.ngrok-free.app'; // ⚠️ HTTP
+const WS_URL = 'wss://server-esp32-pda4.onrender.com'; // Tu servidor Render
 
 function App() {
-  const [led1State, setLed1State] = useState('off');
-  const [led2State, setLed2State] = useState('off');
+  const [ledState, setLedState] = useState('off');
   const [potValue, setPotValue] = useState(0);
-  const [sliderValue, setSliderValue] = useState(0);
-
-  const toggleLed1 = async () => {
-    const newState = led1State === 'on' ? 'off' : 'on';
-    try {
-      await axios.get(`${serverUrl}/led1/${newState}`);
-      setLed1State(newState);
-    } catch (error) {
-      console.error('Error cambiando el estado del LED 1:', error);
-    }
-  };
-
-  const toggleLed2 = async () => {
-    const newState = led2State === 'on' ? 'off' : 'on';
-    try {
-      await axios.get(`${serverUrl}/led2/${newState}`);
-      setLed2State(newState);
-    } catch (error) {
-      console.error('Error cambiando el estado del LED 2:', error);
-    }
-  };
-
-  const sendPotValue = async (value) => {
-    try {
-      const formData = new URLSearchParams();
-      formData.append('value', value);
-      
-      await axios.post(`${serverUrl}/potenciometro`, formData, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      });
-      console.log('Valor enviado:', value);
-    } catch (error) {
-      console.error('Error enviando valor del potenciómetro:', error);
-    }
-  };
-
-  const handleSliderChange = (e) => {
-    const value = e.target.value;
-    setSliderValue(value);
-    sendPotValue(value);
-  };
-
-  const fetchPotValue = async () => {
-    try {
-      const response = await axios.get(`${serverUrl}/potenciometro`);
-      setPotValue(response.data.split(': ')[1]);
-    } catch (error) {
-      console.error('Error obteniendo el valor del potenciómetro:', error);
-    }
-  };
+  const [connected, setConnected] = useState(false);
+  const wsRef = useRef(null);
 
   useEffect(() => {
-    fetchPotValue();
-    const interval = setInterval(() => {
-      fetchPotValue();
-    }, 1000);
-    return () => clearInterval(interval);
+    const connectWebSocket = () => {
+      console.log('🔌 Conectando a WebSocket...');
+      const ws = new WebSocket(WS_URL);
+      
+      ws.onopen = () => {
+        console.log('✅ Conectado al servidor');
+        setConnected(true);
+        ws.send('WEB_CLIENT'); // Identificarse como cliente web
+      };
+
+      ws.onmessage = (event) => {
+        console.log('📩 Mensaje recibido:', event.data);
+        
+        // Recibir valores del potenciómetro desde ESP32
+        if (event.data.startsWith('POT:')) {
+          const value = event.data.split(':')[1];
+          setPotValue(value);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('❌ Desconectado del servidor');
+        setConnected(false);
+        // Reconectar después de 3 segundos
+        setTimeout(connectWebSocket, 3000);
+      };
+
+      ws.onerror = (error) => {
+        console.error('❌ Error WebSocket:', error);
+      };
+
+      wsRef.current = ws;
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
   }, []);
+
+  const toggleLed = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const command = ledState === 'off' ? 'ON' : 'OFF';
+      wsRef.current.send(command);
+      setLedState(ledState === 'off' ? 'on' : 'off');
+      console.log('💡 Comando enviado:', command);
+    } else {
+      console.error('❌ WebSocket no está conectado');
+    }
+  };
+
+  const requestPotValue = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send('GET_POT');
+      console.log('📊 Solicitando valor del potenciómetro');
+    }
+  };
 
   return (
     <div className="App">
-      <h1>Control de 2 LEDs y Potenciómetro con ESP32</h1>
+      <h1>Control ESP32 - WebSocket</h1>
+      
+      <div className={`status ${connected ? 'connected' : 'disconnected'}`}>
+        {connected ? '🟢 Conectado' : '🔴 Desconectado'}
+      </div>
 
-      <div className="led-controls">
-        <div className="led-section">
-          <h2>💡 LED 1 (Pin 12)</h2>
-          <button 
-            onClick={toggleLed1}
-            className={led1State === 'on' ? 'led-on' : 'led-off'}
-          >
-            {led1State === 'on' ? '💡 Apagar LED 1' : '🔆 Encender LED 1'}
-          </button>
-        </div>
-
-        <div className="led-section">
-          <h2>💡 LED 2 (Pin 26)</h2>
-          <button 
-            onClick={toggleLed2}
-            className={led2State === 'on' ? 'led-on' : 'led-off'}
-          >
-            {led2State === 'on' ? '💡 Apagar LED 2' : '🔆 Encender LED 2'}
-          </button>
-        </div>
+      <div className="led-section">
+        <h2>💡 Control LED (Pin 12)</h2>
+        <button 
+          onClick={toggleLed}
+          className={ledState === 'on' ? 'led-on' : 'led-off'}
+          disabled={!connected}
+        >
+          {ledState === 'on' ? '💡 Apagar LED' : '🔆 Encender LED'}
+        </button>
       </div>
 
       <div className="pot-section">
-        <h3>🎚️ Simular Potenciómetro</h3>
-        <input 
-          type="range" 
-          min="0" 
-          max="4095" 
-          value={sliderValue}
-          onChange={handleSliderChange}
-          className="slider"
-        />
-        <p>Valor enviado: {sliderValue}</p>
-      </div>
-
-      <div className="pot-value">
-        <h3>Valor actual del Potenciómetro: {potValue}</h3>
+        <h2>📊 Potenciómetro (Pin 35)</h2>
+        <div className="pot-value">
+          <span>Valor actual: {potValue}</span>
+        </div>
+        <button onClick={requestPotValue} disabled={!connected}>
+          🔄 Actualizar Valor
+        </button>
       </div>
     </div>
   );
